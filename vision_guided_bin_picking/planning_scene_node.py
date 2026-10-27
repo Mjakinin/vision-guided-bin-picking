@@ -54,8 +54,8 @@ class PlanningSceneNode(Node):
         table = self._create_box("workstation_table", 0.45, 0.0, -0.02, 1.2, 1.2, 0.04)
         objects.append(table)
 
-        # 2. Safety Backplate (Industrial safety enclosure rear wall)
-        backplate = self._create_box("safety_backplate", -0.45, 0.0, 0.45, 0.05, 1.2, 0.9)
+        # 2. Safety Backplate (Industrial safety enclosure rear wall with generous clearance)
+        backplate = self._create_box("safety_backplate", -0.60, 0.0, 0.45, 0.05, 1.4, 0.9)
         objects.append(backplate)
 
         # 3. Parts Bin (Floor + 4 Vertical Walls)
@@ -83,6 +83,17 @@ class PlanningSceneNode(Node):
         # Center of Drop-off: x=0.48, y=-0.25
         pallet = self._create_box("dropoff_pallet", 0.48, -0.25, 0.04, 0.28, 0.28, 0.08)
         objects.append(pallet)
+
+        # 5. Workpieces (Cylindrical metal parts inside bin)
+        parts_data = [
+            ("workpiece_1", 0.43, 0.21, 0.05),
+            ("workpiece_2", 0.54, 0.30, 0.05),
+            ("workpiece_3", 0.46, 0.31, 0.05),
+            ("workpiece_4", 0.52, 0.19, 0.05),
+        ]
+        for pid, px, py, pz in parts_data:
+            co_part = self._create_cylinder(pid, px, py, pz + 0.02, height=0.04, radius=0.025)
+            objects.append(co_part)
 
         req.scene.world.collision_objects = objects
 
@@ -119,6 +130,27 @@ class PlanningSceneNode(Node):
         co.primitive_poses.append(pose)
         return co
 
+    def _create_cylinder(self, name, x, y, z, height=0.04, radius=0.025, frame_id="world"):
+        co = CollisionObject()
+        co.header.frame_id = frame_id
+        co.header.stamp = self.get_clock().now().to_msg()
+        co.id = name
+        co.operation = CollisionObject.ADD
+
+        cyl = SolidPrimitive()
+        cyl.type = SolidPrimitive.CYLINDER
+        cyl.dimensions = [float(height), float(radius)]
+
+        pose = Pose()
+        pose.position.x = float(x)
+        pose.position.y = float(y)
+        pose.position.z = float(z)
+        pose.orientation.w = 1.0
+
+        co.primitives.append(cyl)
+        co.primitive_poses.append(pose)
+        return co
+
     def publish_markers(self):
         """Publishes rich colored markers for RViz visualization."""
         ma = MarkerArray()
@@ -144,7 +176,7 @@ class PlanningSceneNode(Node):
         ma.markers.append(m_pallet)
 
         # Backplate (Steel Grey)
-        m_back = self._make_marker(7, "safety_backplate", -0.45, 0.0, 0.45, 0.05, 1.2, 0.9, (0.4, 0.4, 0.45, 0.6), now)
+        m_back = self._make_marker(7, "safety_backplate", -0.60, 0.0, 0.45, 0.05, 1.4, 0.9, (0.4, 0.4, 0.45, 0.6), now)
         ma.markers.append(m_back)
 
         self.marker_pub.publish(ma)
@@ -176,11 +208,12 @@ def main(args=None):
     node = PlanningSceneNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

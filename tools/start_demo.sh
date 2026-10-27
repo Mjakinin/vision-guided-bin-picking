@@ -21,11 +21,15 @@ read -p "Auswahl [1-3] (Standard: 1): " CHOICE
 CHOICE="${CHOICE:-1}"
 
 if [ "$CHOICE" == "1" ]; then
-    echo "➜ Starte MoveIt 2 Workcell, 3D Vision & Task-Orchestrator mit RViz2..."
+    echo "➜ Bereinige alte Prozesse & initialisiere MoveIt 2 Workcell mit RViz2..."
+    docker exec ros_container bash -c "pkill -9 -f 'move_group|rviz2|planning_scene|vision_detector|bin_picking|controller_manager' 2>/dev/null || true; rm -f /dev/shm/fastrtps_* /dev/shm/sem.fastrtps_* 2>/dev/null || true"
+    sleep 0.5
     docker exec -it ros_container bash -c "source /opt/ros/humble/setup.bash && source /root/ros-projects/install/setup.bash && ros2 launch vision_guided_bin_picking bin_picking.launch.py auto_orchestrate:=true"
 
 elif [ "$CHOICE" == "2" ]; then
-    echo "➜ Führe automatisierten Testlauf & Trajektorien-Prüfung aus..."
+    echo "➜ Bereinige alte Prozesse & führe automatisierten Testlauf aus..."
+    docker exec ros_container bash -c "pkill -9 -f 'move_group|rviz2|planning_scene|vision_detector|bin_picking|controller_manager' 2>/dev/null || true; rm -f /dev/shm/fastrtps_* /dev/shm/sem.fastrtps_* 2>/dev/null || true"
+    sleep 0.5
     docker exec -it ros_container bash -c "source /opt/ros/humble/setup.bash && source /root/ros-projects/install/setup.bash && python3 /root/ros-projects/src/vision_guided_bin_picking/tools/test_bin_picking.py"
 
 else
