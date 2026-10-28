@@ -109,7 +109,7 @@ def main():
                     print(f"[{elapsed:5.1f}s] FSM Phase: {st:<25} | Sub: {subaction:<22} | Cycle: {cycle} | Success: {successes}")
                     prev_state = st
 
-                if st == "COMPLETED_ALL" or successes >= 2:
+                if st == "COMPLETED_ALL" or successes >= 4:
                     completed = True
                     break
 

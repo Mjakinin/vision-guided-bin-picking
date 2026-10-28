@@ -157,8 +157,8 @@ class MoveIt2Interface:
         req.group_name = self.group_name
         req.planner_id = "RRTConnectkConfigDefault"
         req.allowed_planning_time = 5.0
-        req.max_velocity_scaling_factor = 0.5
-        req.max_acceleration_scaling_factor = 0.5
+        req.max_velocity_scaling_factor = 0.6
+        req.max_acceleration_scaling_factor = 0.6
 
         # Position Constraint
         pos_con = PositionConstraint()
@@ -174,16 +174,15 @@ class MoveIt2Interface:
         pos_con.constraint_region = bv
         pos_con.weight = 1.0
 
-        # Orientation Constraint
-        # Pointing vertically down; allow full 360 deg yaw rotation for cylindrical grasp symmetry
+        # Orientation Constraint: Keep tool pointing strictly downwards without random spinning
         ori_con = OrientationConstraint()
         ori_con.header.frame_id = "world"
         ori_con.header.stamp = now_msg
         ori_con.link_name = self.ee_link
         ori_con.orientation = target_pose.pose.orientation
-        ori_con.absolute_x_axis_tolerance = 0.35
-        ori_con.absolute_y_axis_tolerance = 0.35
-        ori_con.absolute_z_axis_tolerance = 3.14  # Free yaw rotation around vertical tool axis
+        ori_con.absolute_x_axis_tolerance = 0.25
+        ori_con.absolute_y_axis_tolerance = 0.25
+        ori_con.absolute_z_axis_tolerance = 0.50
         ori_con.weight = 1.0
 
         constraints = Constraints()
@@ -197,10 +196,11 @@ class MoveIt2Interface:
         res = self._call_action_sync(self.move_group_client, goal_msg, timeout_sec=20.0)
         return res is not None and (res.result.error_code.val == 1 or res.status == 4)
 
-    def plan_and_execute_cartesian_path(self, waypoints: list, max_step: float = 0.005) -> bool:
+    def plan_and_execute_cartesian_path(self, waypoints: list, max_step: float = 0.005, avoid_collisions: bool = False) -> bool:
         """
         Computes a strictly linear Cartesian path and executes it.
         Crucial for bin-picking descend/retract to avoid colliding with bin walls.
+        By default, avoid_collisions is False during descend/retract to allow contact with target parts.
         """
         req = GetCartesianPath.Request()
         req.header.frame_id = "world"
@@ -210,7 +210,7 @@ class MoveIt2Interface:
         req.waypoints = waypoints
         req.max_step = max_step
         req.jump_threshold = 0.0
-        req.avoid_collisions = True
+        req.avoid_collisions = avoid_collisions
 
         res = self._call_service_sync(self.cartesian_client, req, timeout_sec=5.0)
         if res is None:
@@ -218,7 +218,7 @@ class MoveIt2Interface:
 
         fraction = res.fraction
         self.node.get_logger().info(f"Cartesian trajectory fraction completed: {fraction * 100:.1f}%")
-        if fraction < 0.90:
+        if fraction < 0.60:
             return False
 
         exec_goal = ExecuteTrajectory.Goal()

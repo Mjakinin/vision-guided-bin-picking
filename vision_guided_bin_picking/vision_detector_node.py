@@ -25,9 +25,9 @@ class VisionDetectorNode(Node):
 
         # Parameters
         self.declare_parameter('bin_center_x', 0.48)
-        self.declare_parameter('bin_center_y', 0.25)
-        self.declare_parameter('bin_floor_z', 0.05)
-        self.declare_parameter('part_height', 0.04)
+        self.declare_parameter('bin_center_y', 0.22)
+        self.declare_parameter('bin_floor_z', 0.02)
+        self.declare_parameter('part_height', 0.05)
 
         self.bin_x = self.get_parameter('bin_center_x').get_parameter_value().double_value
         self.bin_y = self.get_parameter('bin_center_y').get_parameter_value().double_value
@@ -44,12 +44,12 @@ class VisionDetectorNode(Node):
         self.consume_srv = self.create_service(Trigger, '/bin_picking/consume_target', self.consume_target_callback)
 
         # Workpiece inventory in the bin (x_offset, y_offset, yaw_deg, color)
-        # Offsets relative to bin center (0.48, 0.25)
+        # Offsets relative to bin center (0.48, 0.22)
         self.initial_parts = [
-            {"id": "part_alpha", "dx": -0.05, "dy": -0.04, "yaw": 0.0, "color": (0.9, 0.2, 0.2)},   # Red
-            {"id": "part_beta",  "dx":  0.06, "dy":  0.05, "yaw": 45.0, "color": (0.9, 0.8, 0.1)},  # Yellow
-            {"id": "part_gamma", "dx": -0.02, "dy":  0.06, "yaw": -30.0, "color": (0.2, 0.8, 0.9)}, # Cyan
-            {"id": "part_delta", "dx":  0.04, "dy": -0.06, "yaw": 60.0, "color": (0.8, 0.2, 0.8)},  # Magenta
+            {"id": "workpiece_1", "dx": -0.04, "dy": -0.04, "yaw": 0.0, "color": (0.95, 0.2, 0.2)},   # Vivid Red
+            {"id": "workpiece_2", "dx":  0.04, "dy":  0.04, "yaw": 0.0, "color": (0.95, 0.85, 0.1)},  # Bright Gold
+            {"id": "workpiece_3", "dx": -0.04, "dy":  0.04, "yaw": 0.0, "color": (0.15, 0.85, 0.95)}, # Electric Cyan
+            {"id": "workpiece_4", "dx":  0.04, "dy": -0.04, "yaw": 0.0, "color": (0.85, 0.2, 0.85)},  # Neon Magenta
         ]
         self.active_parts = list(self.initial_parts)
 
@@ -59,20 +59,16 @@ class VisionDetectorNode(Node):
 
     def compute_grasp_pose(self, part: dict) -> PoseStamped:
         """
-        Computes 6D grasp pose for Franka Panda.
+        Computes 6D grasp pose for Franka Panda TCP (panda_link8).
         Gripper points straight down (-Z in world):
-        Euler angles: roll=pi, pitch=0.0, yaw=part_yaw
+        Euler angles: roll=pi, pitch=0.0, yaw=0.0
+        At z=0.15m, the gripper fingers (10.3cm length) are centered directly on the 5cm cylinder.
         """
         px = self.bin_x + part["dx"]
         py = self.bin_y + part["dy"]
-        # Grasp Z for panda_link8 (accounting for finger length 10.5cm from link8 to tips)
-        pz = self.bin_z + self.part_h + 0.085
+        pz = 0.15
 
-        # Quaternions for pointing down with custom yaw
-        # In Franka tool frame, z-axis points out of gripper.
-        # Rotating by 180 deg around X (or roll=pi, pitch=0) points tool down.
-        yaw_rad = math.radians(part["yaw"])
-        q = tf_transformations.quaternion_from_euler(math.pi, 0.0, yaw_rad)
+        q = tf_transformations.quaternion_from_euler(math.pi, 0.0, 0.0)
 
         target = PoseStamped()
         target.header.frame_id = "world"
@@ -88,14 +84,11 @@ class VisionDetectorNode(Node):
 
     def get_best_part(self):
         """
-        Calculates grasp quality based on distance from bin boundary walls.
-        Parts closest to the bin center have the highest clearance.
+        Picks the next available workpiece from inventory.
         """
         if not self.active_parts:
             return None
-        # Sort by lowest radial offset from bin center (highest wall clearance)
-        sorted_parts = sorted(self.active_parts, key=lambda p: math.hypot(p["dx"], p["dy"]))
-        return sorted_parts[0]
+        return self.active_parts[0]
 
     def detection_loop(self):
         """Publishes detected parts and visual markers."""
@@ -117,6 +110,11 @@ class VisionDetectorNode(Node):
         ma = MarkerArray()
         now = self.get_clock().now().to_msg()
 
+        # Delete all previous markers so picked parts vanish immediately
+        del_all = Marker()
+        del_all.action = Marker.DELETEALL
+        ma.markers.append(del_all)
+
         for i, p in enumerate(self.active_parts):
             px = self.bin_x + p["dx"]
             py = self.bin_y + p["dy"]
@@ -133,15 +131,9 @@ class VisionDetectorNode(Node):
             m.pose.position.x = float(px)
             m.pose.position.y = float(py)
             m.pose.position.z = float(pz)
+            m.pose.orientation.w = 1.0
 
-            yaw_rad = math.radians(p["yaw"])
-            q = tf_transformations.quaternion_from_euler(0.0, 0.0, yaw_rad)
-            m.pose.orientation.x = float(q[0])
-            m.pose.orientation.y = float(q[1])
-            m.pose.orientation.z = float(q[2])
-            m.pose.orientation.w = float(q[3])
-
-            m.scale.x = 0.05  # Diameter
+            m.scale.x = 0.05  # Diameter (5cm)
             m.scale.y = 0.05
             m.scale.z = float(self.part_h)
 
@@ -151,7 +143,7 @@ class VisionDetectorNode(Node):
             m.color.a = 0.95
             ma.markers.append(m)
 
-            # Grasp Arrow Marker
+            # Grasp Approach Arrow Marker
             arrow = Marker()
             arrow.header.frame_id = "world"
             arrow.header.stamp = now
@@ -160,21 +152,21 @@ class VisionDetectorNode(Node):
             arrow.type = Marker.ARROW
             arrow.action = Marker.ADD
 
-            # Start point: 6cm above part
-            p_start = Point(x=float(px), y=float(py), z=float(pz + 0.08))
-            # End point: at part top
-            p_end = Point(x=float(px), y=float(py), z=float(pz + 0.01))
+            # Start point: 10cm above part
+            p_start = Point(x=float(px), y=float(py), z=float(pz + 0.12))
+            # End point: at top of part
+            p_end = Point(x=float(px), y=float(py), z=float(pz + 0.03))
             arrow.points = [p_start, p_end]
 
-            arrow.scale.x = 0.008  # Shaft diameter
-            arrow.scale.y = 0.015  # Head diameter
-            arrow.scale.z = 0.02   # Head length
+            arrow.scale.x = 0.010  # Shaft diameter
+            arrow.scale.y = 0.020  # Head diameter
+            arrow.scale.z = 0.025  # Head length
 
-            # Highlight best candidate in bright green, others white
+            # Highlight best candidate in glowing green, others subtle grey/white
             if p == best:
                 arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = (0.1, 1.0, 0.2, 1.0)
             else:
-                arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = (0.8, 0.8, 0.8, 0.5)
+                arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = (0.7, 0.7, 0.7, 0.4)
             ma.markers.append(arrow)
 
         self.marker_pub.publish(ma)

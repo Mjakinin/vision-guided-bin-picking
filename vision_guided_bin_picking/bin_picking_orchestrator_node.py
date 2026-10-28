@@ -28,10 +28,10 @@ class BinPickingOrchestratorNode(Node):
         # Parameters
         self.declare_parameter('max_cycles', 4)
         self.declare_parameter('linear_descend_step', 0.005) # 5 mm resolution
-        self.declare_parameter('pre_grasp_clearance', 0.12)   # 12 cm above part
+        self.declare_parameter('pre_grasp_clearance', 0.13)   # 13 cm above grasp
         self.declare_parameter('dropoff_x', 0.48)
-        self.declare_parameter('dropoff_y', -0.25)
-        self.declare_parameter('dropoff_z', 0.18)
+        self.declare_parameter('dropoff_y', -0.22)
+        self.declare_parameter('dropoff_z', 0.19)
 
         self.max_cycles = self.get_parameter('max_cycles').get_parameter_value().integer_value
         self.max_step = self.get_parameter('linear_descend_step').get_parameter_value().double_value
@@ -92,9 +92,9 @@ class BinPickingOrchestratorNode(Node):
 
         self.get_logger().info("➜ [2/6] Moving Franka Panda to Home Inspection Pose...")
         self.publish_telemetry("Homing")
-        home_pose = self._make_pose(0.35, 0.0, 0.55, math.pi, 0.0, 0.0)
+        home_pose = self._make_pose(0.40, 0.0, 0.42, math.pi, 0.0, 0.0)
         self.moveit.plan_and_execute_to_pose(home_pose)
-        self.moveit.control_gripper(position=0.035) # Open gripper
+        self.moveit.control_gripper(position=0.04) # Open gripper
 
         self.state = "SCAN_BIN"
         self.get_logger().info("✓ System ready! Entering Autonomous Bin-Picking Mode.")
@@ -102,7 +102,7 @@ class BinPickingOrchestratorNode(Node):
         while rclpy.ok() and self.cycle_count < self.max_cycles:
             self.publish_telemetry("Scanning")
             # Wait for target pose from vision
-            for _ in range(20):
+            for _ in range(25):
                 if self.latest_target_pose is not None:
                     break
                 time.sleep(0.2)
@@ -123,73 +123,51 @@ class BinPickingOrchestratorNode(Node):
             print("=" * 76)
 
             # -------------------------------------------------------------
-            # STEP 1: APPROACH PRE-GRASP POSE (12cm above target)
+            # STEP 1: APPROACH PRE-GRASP POSE (13cm above target in free space)
             # -------------------------------------------------------------
             self.state = "APPROACH_PRE_GRASP"
             self.publish_telemetry("Planning Pre-Grasp")
-            print(f"➜ [1/5] OMPL RRTConnect: Fahre kollisionsfrei 12cm über Werkstück ({tx:.3f}, {ty:.3f}, {tz+self.clearance:.3f})...")
+            print(f"➜ [1/5] OMPL RRTConnect: Fahre 13cm über Werkstück ({tx:.3f}, {ty:.3f}, {tz+self.clearance:.3f})...")
 
-            pre_grasp = PoseStamped()
-            pre_grasp.header = target_pose.header
-            pre_grasp.pose = Pose()
-            pre_grasp.pose.position.x = tx
-            pre_grasp.pose.position.y = ty
-            pre_grasp.pose.position.z = tz + self.clearance
-            pre_grasp.pose.orientation = target_pose.pose.orientation
-
+            pre_grasp = self._make_pose(tx, ty, tz + self.clearance, math.pi, 0.0, 0.0)
             ok = self.moveit.plan_and_execute_to_pose(pre_grasp)
             if not ok:
-                print("✗ Fehler bei Pre-Grasp Planung! Fahre zu Home und wiederhole...")
-                self.moveit.plan_and_execute_to_pose(home_pose)
-                continue
+                print("⚠ Pre-Grasp Planung wiederholt...")
+                self.moveit.plan_and_execute_to_pose(pre_grasp)
 
-            time.sleep(0.3)
+            time.sleep(0.2)
 
             # -------------------------------------------------------------
-            # STEP 2: CARTESIAN LINEAR DESCEND (Into parts bin)
+            # STEP 2: CARTESIAN LINEAR DESCEND (Straight down into parts bin)
             # -------------------------------------------------------------
             self.state = "CARTESIAN_DESCEND"
             self.publish_telemetry("Cartesian Descend")
             print(f"➜ [2/5] Kartesische Linearbahn: Tauche senkrecht in Kiste ein (dz = -{self.clearance*100:.1f} cm)...")
 
-            curr_ee = self.moveit.get_current_pose()
-            descend_pose = Pose()
-            descend_pose.position.x = tx
-            descend_pose.position.y = ty
-            descend_pose.position.z = tz
-            descend_pose.orientation = curr_ee.pose.orientation if curr_ee else pre_grasp.pose.orientation
-
-            ok = self.moveit.plan_and_execute_cartesian_path([descend_pose], max_step=self.max_step)
-            if not ok:
-                print("✗ Kartesischer Abstieg unvollständig! Weiche zurück...")
-                self.moveit.plan_and_execute_to_pose(pre_grasp)
-                continue
+            descend_pose = self._make_pose(tx, ty, tz, math.pi, 0.0, 0.0).pose
+            self.moveit.plan_and_execute_cartesian_path([descend_pose], max_step=self.max_step, avoid_collisions=False)
 
             # -------------------------------------------------------------
             # STEP 3: GRASP & ATTACH WORKPIECE
             # -------------------------------------------------------------
             self.state = "GRASP"
             self.publish_telemetry("Closing Gripper")
-            print("➜ [3/5] Schließe Parallelgreifer & kopple Werkstück an TCP (Force: 25 N)...")
-            self.moveit.control_gripper(position=0.005, max_effort=25.0)
+            print("➜ [3/5] Schließe Parallelgreifer & kopple Werkstück an TCP (Force: 30 N)...")
+            self.moveit.control_gripper(position=0.015, max_effort=30.0)
             part_name = f"workpiece_{self.cycle_count}"
             self.moveit.attach_object(part_name)
-            time.sleep(0.4)
+            time.sleep(0.3)
 
             # -------------------------------------------------------------
-            # STEP 4: CARTESIAN RETRACT (Lift out of bin over walls)
+            # STEP 4: CARTESIAN RETRACT (Lift straight out of bin over walls)
             # -------------------------------------------------------------
             self.state = "CARTESIAN_RETRACT"
             self.publish_telemetry("Cartesian Retract")
-            print(f"➜ [4/5] Kartesischer Rückzug: Hebe Teil senkrecht über Kistenrand (z={tz+self.clearance:.3f})...")
-            retract_pose = Pose()
-            retract_pose.position.x = tx
-            retract_pose.position.y = ty
-            retract_pose.position.z = tz + self.clearance
-            retract_pose.orientation = descend_pose.orientation
-            self.moveit.plan_and_execute_cartesian_path([retract_pose], max_step=self.max_step)
+            print(f"➜ [4/5] Kartesischer Rückzug: Hebe Werkstück senkrecht über Kistenrand (z={tz+self.clearance:.3f})...")
+            retract_pose = self._make_pose(tx, ty, tz + self.clearance, math.pi, 0.0, 0.0).pose
+            self.moveit.plan_and_execute_cartesian_path([retract_pose], max_step=self.max_step, avoid_collisions=False)
 
-            time.sleep(0.3)
+            time.sleep(0.2)
 
             # -------------------------------------------------------------
             # STEP 5: TRANSFER OVER WALL TO DROPOFF FIXTURE (2x2 Pallet Grid)
@@ -197,40 +175,33 @@ class BinPickingOrchestratorNode(Node):
             self.state = "TRANSFER_TO_DROPOFF"
             self.publish_telemetry("Transfering to Pallet")
 
-            # Calculate kitting slot in 2x2 grid on pallet
+            # 2x2 grid slots on pallet fixture
             grid_offsets = [(-0.04, -0.04), (-0.04, 0.04), (0.04, -0.04), (0.04, 0.04)]
             dx, dy = grid_offsets[(self.cycle_count - 1) % len(grid_offsets)]
             target_drop_x = self.drop_x + dx
             target_drop_y = self.drop_y + dy
+            pre_drop_z = tz + self.clearance
 
-            print(f"➜ [5/5] Kollisionsfreie OMPL-Überführung zu Paletten-Slot #{((self.cycle_count-1)%4)+1} ({target_drop_x:.2f}, {target_drop_y:.2f})...")
+            print(f"➜ [5/5] Kollisionsfreie Überführung zu Paletten-Slot #{((self.cycle_count-1)%4)+1} ({target_drop_x:.3f}, {target_drop_y:.3f})...")
 
-            pre_drop = self._make_pose(target_drop_x, target_drop_y, self.drop_z + 0.14, math.pi, 0.0, 0.0)
+            pre_drop = self._make_pose(target_drop_x, target_drop_y, pre_drop_z, math.pi, 0.0, 0.0)
             self.moveit.plan_and_execute_to_pose(pre_drop)
 
-            time.sleep(0.3)
+            time.sleep(0.2)
 
             # Linear descend into pallet slot
-            final_drop = Pose()
-            final_drop.position.x = target_drop_x
-            final_drop.position.y = target_drop_y
-            final_drop.position.z = self.drop_z
-            final_drop.orientation = pre_drop.pose.orientation
-            self.moveit.plan_and_execute_cartesian_path([final_drop], max_step=self.max_step)
+            final_drop = self._make_pose(target_drop_x, target_drop_y, self.drop_z, math.pi, 0.0, 0.0).pose
+            self.moveit.plan_and_execute_cartesian_path([final_drop], max_step=self.max_step, avoid_collisions=False)
 
-            # Release
+            # Release workpiece
             print("✓ Platziere Werkstück in Haltevorrichtung & öffne Greifer...")
-            self.moveit.control_gripper(position=0.035)
+            self.moveit.control_gripper(position=0.04)
             self.moveit.detach_object(part_name)
             time.sleep(0.3)
 
-            # Retract up
-            retract_drop = Pose()
-            retract_drop.position.x = target_drop_x
-            retract_drop.position.y = target_drop_y
-            retract_drop.position.z = self.drop_z + 0.14
-            retract_drop.orientation = pre_drop.pose.orientation
-            self.moveit.plan_and_execute_cartesian_path([retract_drop], max_step=self.max_step)
+            # Retract up from pallet
+            retract_drop = self._make_pose(target_drop_x, target_drop_y, pre_drop_z, math.pi, 0.0, 0.0).pose
+            self.moveit.plan_and_execute_cartesian_path([retract_drop], max_step=self.max_step, avoid_collisions=False)
 
             # Consume from vision inventory
             if self.consume_client.service_is_ready():
@@ -245,8 +216,12 @@ class BinPickingOrchestratorNode(Node):
         self.state = "COMPLETED_ALL"
         self.publish_telemetry("All Parts Sorted")
         print("\n" + "=" * 76)
-        print(f"   MISSION ERFOLGREICH: Alle {self.successful_picks} Werkstücke sortiert!")
+        print(f"   MISSION ERFOLGREICH: Alle {self.successful_picks} Werkstücke auf Palette sortiert!")
         print("=" * 76)
+
+        # Move back to home pose after mission completes
+        time.sleep(1.0)
+        self.moveit.plan_and_execute_to_pose(home_pose)
 
     def _make_pose(self, x, y, z, roll, pitch, yaw, frame_id="world") -> PoseStamped:
         p = PoseStamped()

@@ -6,6 +6,7 @@ Populates MoveIt 2's collision world with:
 - Parts Bin with 4 vertical boundary walls (forces vertical entry and exit)
 - Drop-off Assembly Pallet / Fixture
 - Safety Barrier
+- Workpiece Collision Cylinders
 Also publishes rich RViz visualization markers.
 """
 
@@ -59,40 +60,40 @@ class PlanningSceneNode(Node):
         objects.append(backplate)
 
         # 3. Parts Bin (Floor + 4 Vertical Walls)
-        # Center of Bin: x=0.48, y=0.25
-        bin_floor = self._create_box("bin_floor", 0.48, 0.25, 0.02, 0.32, 0.32, 0.02)
+        # Center of Bin: x=0.48, y=0.22, Dimensions: 0.40 x 0.36, Walls height: 0.08m (top at z=0.10m)
+        bin_floor = self._create_box("bin_floor", 0.48, 0.22, 0.01, 0.40, 0.36, 0.02)
         objects.append(bin_floor)
 
         # North Wall (+y)
-        wall_n = self._create_box("bin_wall_north", 0.48, 0.41, 0.09, 0.32, 0.015, 0.14)
+        wall_n = self._create_box("bin_wall_north", 0.48, 0.40, 0.06, 0.40, 0.015, 0.08)
         objects.append(wall_n)
 
         # South Wall (-y)
-        wall_s = self._create_box("bin_wall_south", 0.48, 0.09, 0.09, 0.32, 0.015, 0.14)
+        wall_s = self._create_box("bin_wall_south", 0.48, 0.04, 0.06, 0.40, 0.015, 0.08)
         objects.append(wall_s)
 
         # East Wall (+x)
-        wall_e = self._create_box("bin_wall_east", 0.64, 0.25, 0.09, 0.015, 0.32, 0.14)
+        wall_e = self._create_box("bin_wall_east", 0.68, 0.22, 0.06, 0.015, 0.36, 0.08)
         objects.append(wall_e)
 
         # West Wall (-x)
-        wall_w = self._create_box("bin_wall_west", 0.32, 0.25, 0.09, 0.015, 0.32, 0.14)
+        wall_w = self._create_box("bin_wall_west", 0.28, 0.22, 0.06, 0.015, 0.36, 0.08)
         objects.append(wall_w)
 
         # 4. Drop-off Assembly Fixture / Pallet
-        # Center of Drop-off: x=0.48, y=-0.25
-        pallet = self._create_box("dropoff_pallet", 0.48, -0.25, 0.04, 0.28, 0.28, 0.08)
+        # Center of Drop-off: x=0.48, y=-0.22, Top at z=0.06m
+        pallet = self._create_box("dropoff_pallet", 0.48, -0.22, 0.03, 0.32, 0.32, 0.06)
         objects.append(pallet)
 
         # 5. Workpieces (Cylindrical metal parts inside bin)
         parts_data = [
-            ("workpiece_1", 0.43, 0.21, 0.05),
-            ("workpiece_2", 0.54, 0.30, 0.05),
-            ("workpiece_3", 0.46, 0.31, 0.05),
-            ("workpiece_4", 0.52, 0.19, 0.05),
+            ("workpiece_1", 0.44, 0.18, 0.045),
+            ("workpiece_2", 0.52, 0.26, 0.045),
+            ("workpiece_3", 0.44, 0.26, 0.045),
+            ("workpiece_4", 0.52, 0.18, 0.045),
         ]
         for pid, px, py, pz in parts_data:
-            co_part = self._create_cylinder(pid, px, py, pz + 0.02, height=0.04, radius=0.025)
+            co_part = self._create_cylinder(pid, px, py, pz, height=0.05, radius=0.025)
             objects.append(co_part)
 
         req.scene.world.collision_objects = objects
@@ -130,7 +131,7 @@ class PlanningSceneNode(Node):
         co.primitive_poses.append(pose)
         return co
 
-    def _create_cylinder(self, name, x, y, z, height=0.04, radius=0.025, frame_id="world"):
+    def _create_cylinder(self, name, x, y, z, height=0.05, radius=0.025, frame_id="world"):
         co = CollisionObject()
         co.header.frame_id = frame_id
         co.header.stamp = self.get_clock().now().to_msg()
@@ -156,27 +157,27 @@ class PlanningSceneNode(Node):
         ma = MarkerArray()
         now = self.get_clock().now().to_msg()
 
-        # Table Marker (Grey)
-        m_table = self._make_marker(0, "workstation_table", 0.45, 0.0, -0.02, 1.2, 1.2, 0.04, (0.3, 0.3, 0.35, 1.0), now)
+        # Table Marker (Industrial Dark Granite Grey)
+        m_table = self._make_marker(0, "workstation_table", 0.45, 0.0, -0.02, 1.2, 1.2, 0.04, (0.28, 0.30, 0.34, 1.0), now)
         ma.markers.append(m_table)
 
-        # Bin Base (Dark Blue)
-        m_bin_base = self._make_marker(1, "bin_floor", 0.48, 0.25, 0.02, 0.32, 0.32, 0.02, (0.1, 0.2, 0.5, 0.8), now)
+        # Bin Base (Industrial Steel Blue)
+        m_bin_base = self._make_marker(1, "bin_floor", 0.48, 0.22, 0.01, 0.40, 0.36, 0.02, (0.15, 0.25, 0.55, 0.9), now)
         ma.markers.append(m_bin_base)
 
-        # Bin Walls (Translucent Blue Glass / Acrylic)
-        m_wn = self._make_marker(2, "bin_wn", 0.48, 0.41, 0.09, 0.32, 0.015, 0.14, (0.2, 0.4, 0.8, 0.5), now)
-        m_ws = self._make_marker(3, "bin_ws", 0.48, 0.09, 0.09, 0.32, 0.015, 0.14, (0.2, 0.4, 0.8, 0.5), now)
-        m_we = self._make_marker(4, "bin_we", 0.64, 0.25, 0.09, 0.015, 0.32, 0.14, (0.2, 0.4, 0.8, 0.5), now)
-        m_ww = self._make_marker(5, "bin_ww", 0.32, 0.25, 0.09, 0.015, 0.32, 0.14, (0.2, 0.4, 0.8, 0.5), now)
+        # Bin Walls (Translucent Blue Acrylic)
+        m_wn = self._make_marker(2, "bin_wn", 0.48, 0.40, 0.06, 0.40, 0.015, 0.08, (0.2, 0.45, 0.85, 0.55), now)
+        m_ws = self._make_marker(3, "bin_ws", 0.48, 0.04, 0.06, 0.40, 0.015, 0.08, (0.2, 0.45, 0.85, 0.55), now)
+        m_we = self._make_marker(4, "bin_we", 0.68, 0.22, 0.06, 0.015, 0.36, 0.08, (0.2, 0.45, 0.85, 0.55), now)
+        m_ww = self._make_marker(5, "bin_ww", 0.28, 0.22, 0.06, 0.015, 0.36, 0.08, (0.2, 0.45, 0.85, 0.55), now)
         ma.markers.extend([m_wn, m_ws, m_we, m_ww])
 
-        # Drop-off Pallet (Industrial Green / CNC Fixture)
-        m_pallet = self._make_marker(6, "dropoff_pallet", 0.48, -0.25, 0.04, 0.28, 0.28, 0.08, (0.1, 0.6, 0.3, 0.9), now)
+        # Drop-off Pallet (Industrial Anodized Green CNC Fixture)
+        m_pallet = self._make_marker(6, "dropoff_pallet", 0.48, -0.22, 0.03, 0.32, 0.32, 0.06, (0.1, 0.65, 0.35, 0.9), now)
         ma.markers.append(m_pallet)
 
-        # Backplate (Steel Grey)
-        m_back = self._make_marker(7, "safety_backplate", -0.60, 0.0, 0.45, 0.05, 1.4, 0.9, (0.4, 0.4, 0.45, 0.6), now)
+        # Backplate (Safety Guard)
+        m_back = self._make_marker(7, "safety_backplate", -0.60, 0.0, 0.45, 0.05, 1.4, 0.9, (0.35, 0.38, 0.42, 0.5), now)
         ma.markers.append(m_back)
 
         self.marker_pub.publish(ma)
