@@ -85,17 +85,6 @@ class PlanningSceneNode(Node):
         pallet = self._create_box("dropoff_pallet", 0.48, -0.22, 0.03, 0.32, 0.32, 0.06)
         objects.append(pallet)
 
-        # 5. Workpieces (Cylindrical metal parts inside bin)
-        parts_data = [
-            ("workpiece_1", 0.44, 0.18, 0.045),
-            ("workpiece_2", 0.52, 0.26, 0.045),
-            ("workpiece_3", 0.44, 0.26, 0.045),
-            ("workpiece_4", 0.52, 0.18, 0.045),
-        ]
-        for pid, px, py, pz in parts_data:
-            co_part = self._create_cylinder(pid, px, py, pz, height=0.05, radius=0.025)
-            objects.append(co_part)
-
         req.scene.world.collision_objects = objects
 
         future = self.scene_client.call_async(req)

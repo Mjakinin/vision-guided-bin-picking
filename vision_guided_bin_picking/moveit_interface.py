@@ -50,6 +50,11 @@ class MoveIt2Interface:
         self.cartesian_client = self.node.create_client(GetCartesianPath, "/compute_cartesian_path")
         self.scene_client = self.node.create_client(ApplyPlanningScene, "/apply_planning_scene")
 
+        # Attached Collision Object Publisher (for robust attach/detach)
+        self.attached_object_pub = self.node.create_publisher(
+            AttachedCollisionObject, "/attached_collision_object", 10
+        )
+
         # TF Buffer for looking up current end-effector pose
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self.node)
@@ -240,29 +245,35 @@ class MoveIt2Interface:
         return res is not None
 
     def attach_object(self, object_id: str, link_name: str = "panda_hand") -> bool:
-        """Attaches a grasped collision object to the end-effector link."""
+        """Attaches a grasped collision cylinder to the end-effector link."""
         aco = AttachedCollisionObject()
         aco.link_name = link_name
         aco.object.id = object_id
-        aco.touch_links = ["panda_hand", "panda_leftfinger", "panda_rightfinger"]
+        aco.object.operation = CollisionObject.ADD
+        aco.touch_links = ["panda_hand", "panda_leftfinger", "panda_rightfinger", "panda_link7", "panda_link8"]
 
-        req = ApplyPlanningScene.Request()
-        req.scene.is_diff = True
-        req.scene.robot_state.attached_collision_objects.append(aco)
+        # Define cylinder geometry directly so MoveIt always renders it attached to gripper
+        cyl = SolidPrimitive()
+        cyl.type = SolidPrimitive.CYLINDER
+        cyl.dimensions = [0.05, 0.025] # 5cm height, 2.5cm radius
+        aco.object.primitives.append(cyl)
 
-        res = self._call_service_sync(self.scene_client, req, timeout_sec=3.0)
-        return res is not None and res.success
+        p = Pose()
+        p.position.z = 0.065 # Centered between gripper fingers
+        p.orientation.w = 1.0
+        aco.object.primitive_poses.append(p)
+
+        self.attached_object_pub.publish(aco)
+        self.node.get_logger().info(f"Attached '{object_id}' to {link_name}.")
+        return True
 
     def detach_object(self, object_id: str, link_name: str = "panda_hand") -> bool:
-        """Detaches an object upon release."""
+        """Detaches an object upon release so it stays placed in the workcell."""
         aco = AttachedCollisionObject()
         aco.link_name = link_name
         aco.object.id = object_id
         aco.object.operation = CollisionObject.REMOVE
 
-        req = ApplyPlanningScene.Request()
-        req.scene.is_diff = True
-        req.scene.robot_state.attached_collision_objects.append(aco)
-
-        res = self._call_service_sync(self.scene_client, req, timeout_sec=3.0)
-        return res is not None and res.success
+        self.attached_object_pub.publish(aco)
+        self.node.get_logger().info(f"Detached '{object_id}' from {link_name}.")
+        return True

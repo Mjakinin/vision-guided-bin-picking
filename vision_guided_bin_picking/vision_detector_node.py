@@ -52,6 +52,7 @@ class VisionDetectorNode(Node):
             {"id": "workpiece_4", "dx":  0.04, "dy": -0.04, "yaw": 0.0, "color": (0.85, 0.2, 0.85)},  # Neon Magenta
         ]
         self.active_parts = list(self.initial_parts)
+        self.placed_parts = []
 
         # Periodic detection and marker publish loop (2 Hz)
         self.timer = self.create_timer(0.5, self.detection_loop)
@@ -169,6 +170,28 @@ class VisionDetectorNode(Node):
                 arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = (0.7, 0.7, 0.7, 0.4)
             ma.markers.append(arrow)
 
+        # Placed parts on the pallet fixture (2x2 grid)
+        for j, pl in enumerate(self.placed_parts):
+            m_pl = Marker()
+            m_pl.header.frame_id = "world"
+            m_pl.header.stamp = now
+            m_pl.ns = "placed_parts"
+            m_pl.id = 200 + j
+            m_pl.type = Marker.CYLINDER
+            m_pl.action = Marker.ADD
+            m_pl.pose.position.x = float(pl["px"])
+            m_pl.pose.position.y = float(pl["py"])
+            m_pl.pose.position.z = float(pl["pz"])
+            m_pl.pose.orientation.w = 1.0
+            m_pl.scale.x = 0.05
+            m_pl.scale.y = 0.05
+            m_pl.scale.z = float(self.part_h)
+            m_pl.color.r = float(pl["color"][0])
+            m_pl.color.g = float(pl["color"][1])
+            m_pl.color.b = float(pl["color"][2])
+            m_pl.color.a = 1.0
+            ma.markers.append(m_pl)
+
         self.marker_pub.publish(ma)
 
     def get_next_target_callback(self, request, response):
@@ -187,9 +210,20 @@ class VisionDetectorNode(Node):
         if best:
             part_id = best['id']
             self.active_parts.remove(best)
+
+            # Record placed workpiece position on dropoff pallet
+            grid_offsets = [(-0.04, -0.04), (-0.04, 0.04), (0.04, -0.04), (0.04, 0.04)]
+            slot_idx = len(self.placed_parts)
+            dx, dy = grid_offsets[slot_idx % len(grid_offsets)]
+            placed = dict(best)
+            placed["px"] = 0.48 + dx
+            placed["py"] = -0.22 + dy
+            placed["pz"] = 0.06 + self.part_h / 2.0
+            self.placed_parts.append(placed)
+
             response.success = True
-            response.message = f"Consumed {part_id}. Remaining: {len(self.active_parts)}"
-            self.get_logger().info(f"✓ Workpiece {part_id} picked! {len(self.active_parts)} parts left in bin.")
+            response.message = f"Consumed {part_id}. Remaining in bin: {len(self.active_parts)}"
+            self.get_logger().info(f"✓ Workpiece {part_id} picked & placed on pallet! {len(self.active_parts)} parts left in bin.")
             self.detection_loop()
         else:
             response.success = False
