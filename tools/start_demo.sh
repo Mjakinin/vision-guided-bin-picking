@@ -9,6 +9,13 @@ set -e
 # Allow Docker container to access host X11 display (for RViz2)
 xhost +local:docker > /dev/null 2>&1 || true
 
+# Ensure ros_container is running
+if [ -z "$(docker ps -q -f name=ros_container)" ]; then
+    echo "➜ Starte ros_container Docker-Container..."
+    docker start ros_container > /dev/null 2>&1 || true
+    sleep 1
+fi
+
 echo "=============================================================================="
 echo "    VISION-GUIDED BIN-PICKING & SMART MANIPULATION (MOVEIT 2)"
 echo "=============================================================================="
