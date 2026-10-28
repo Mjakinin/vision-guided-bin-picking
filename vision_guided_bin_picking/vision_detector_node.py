@@ -64,11 +64,13 @@ class VisionDetectorNode(Node):
         Computes 6D grasp pose for Franka Panda TCP (panda_link8).
         Gripper points straight down (-Z in world):
         Euler angles: roll=pi, pitch=0.0, yaw=0.0
-        At z=0.15m, the gripper fingers (10.3cm length) are centered directly on the 5cm cylinder.
+        Cylinder center is at bin_floor_z + part_height/2 = 0.02 + 0.025 = 0.045m.
+        Distance from panda_link8 along +Z to finger grasp center is 0.1034m.
+        Therefore, panda_link8 target z = 0.045 + 0.1034 = 0.1484m.
         """
         px = self.bin_x + part["dx"]
         py = self.bin_y + part["dy"]
-        pz = 0.15
+        pz = self.bin_z + (self.part_h / 2.0) + 0.1034  # 0.1484m exact
 
         q = tf_transformations.quaternion_from_euler(math.pi, 0.0, 0.0)
 

@@ -31,7 +31,7 @@ class BinPickingOrchestratorNode(Node):
         self.declare_parameter('pre_grasp_clearance', 0.13)   # 13 cm above grasp
         self.declare_parameter('dropoff_x', 0.48)
         self.declare_parameter('dropoff_y', -0.22)
-        self.declare_parameter('dropoff_z', 0.19)
+        self.declare_parameter('dropoff_z', 0.1884) # Pallet top 0.06 + part center 0.025 + TCP 0.1034 = 0.1884m
 
         self.max_cycles = self.get_parameter('max_cycles').get_parameter_value().integer_value
         self.max_step = self.get_parameter('linear_descend_step').get_parameter_value().double_value
@@ -185,7 +185,7 @@ class BinPickingOrchestratorNode(Node):
             dx, dy = grid_offsets[(self.cycle_count - 1) % len(grid_offsets)]
             target_drop_x = self.drop_x + dx
             target_drop_y = self.drop_y + dy
-            pre_drop_z = tz + self.clearance
+            pre_drop_z = self.drop_z + self.clearance
 
             print(f"➜ [5/5] Kollisionsfreie Überführung zu Paletten-Slot #{((self.cycle_count-1)%4)+1} ({target_drop_x:.3f}, {target_drop_y:.3f})...")
 

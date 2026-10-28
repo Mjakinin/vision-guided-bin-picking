@@ -248,7 +248,7 @@ class MoveIt2Interface:
         res = self._call_action_sync(self.gripper_client, goal, timeout_sec=5.0)
         return res is not None
 
-    def attach_object(self, object_id: str, link_name: str = "panda_hand") -> bool:
+    def attach_object(self, object_id: str, link_name: str = "panda_link8") -> bool:
         """Attaches a grasped collision cylinder to the end-effector link."""
         aco = AttachedCollisionObject()
         aco.link_name = link_name
@@ -264,16 +264,22 @@ class MoveIt2Interface:
         cyl.dimensions = [0.05, 0.025] # 5cm height, 2.5cm radius
         aco.object.primitives.append(cyl)
 
+        # Exact TCP offset from panda_link8 flange to center of finger pads: z = 0.1034m
         p = Pose()
-        p.position.z = 0.065 # Centered between gripper fingers
+        p.position.x = 0.0
+        p.position.y = 0.0
+        p.position.z = 0.1034 # Exact Franka Panda TCP grasp center
+        p.orientation.x = 0.0
+        p.orientation.y = 0.0
+        p.orientation.z = 0.0
         p.orientation.w = 1.0
         aco.object.primitive_poses.append(p)
 
         self.attached_object_pub.publish(aco)
-        self.node.get_logger().info(f"Attached '{object_id}' to {link_name}.")
+        self.node.get_logger().info(f"Attached '{object_id}' to {link_name} at TCP z=0.1034m.")
         return True
 
-    def detach_object(self, object_id: str, link_name: str = "panda_hand") -> bool:
+    def detach_object(self, object_id: str, link_name: str = "panda_link8") -> bool:
         """Detaches an object upon release so it stays placed in the workcell."""
         aco = AttachedCollisionObject()
         aco.link_name = link_name
