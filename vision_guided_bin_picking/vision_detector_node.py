@@ -52,7 +52,6 @@ class VisionDetectorNode(Node):
             {"id": "workpiece_4", "marker_id": 3, "dx":  0.04, "dy": -0.04, "yaw": 0.0, "color": (0.85, 0.2, 0.85)},  # Neon Magenta
         ]
         self.active_parts = list(self.initial_parts)
-        self.placed_parts = []
         self.consumed_marker_ids = []
 
         # Periodic detection and marker publish loop (2 Hz)
@@ -116,14 +115,6 @@ class VisionDetectorNode(Node):
 
         # Delete markers that were consumed
         for mid in self.consumed_marker_ids:
-            del_part = Marker()
-            del_part.header.frame_id = "world"
-            del_part.header.stamp = now
-            del_part.ns = "parts"
-            del_part.id = mid
-            del_part.action = Marker.DELETE
-            ma.markers.append(del_part)
-
             del_arrow = Marker()
             del_arrow.header.frame_id = "world"
             del_arrow.header.stamp = now
@@ -138,30 +129,7 @@ class VisionDetectorNode(Node):
             py = self.bin_y + p["dy"]
             pz = self.bin_z + self.part_h / 2.0
 
-            # Workpiece body (Cylinder / Industrial Bushing)
-            m = Marker()
-            m.header.frame_id = "world"
-            m.header.stamp = now
-            m.ns = "parts"
-            m.id = mid
-            m.type = Marker.CYLINDER
-            m.action = Marker.ADD
-            m.pose.position.x = float(px)
-            m.pose.position.y = float(py)
-            m.pose.position.z = float(pz)
-            m.pose.orientation.w = 1.0
-
-            m.scale.x = 0.05  # Diameter (5cm)
-            m.scale.y = 0.05
-            m.scale.z = float(self.part_h)
-
-            m.color.r = float(p["color"][0])
-            m.color.g = float(p["color"][1])
-            m.color.b = float(p["color"][2])
-            m.color.a = 0.95
-            ma.markers.append(m)
-
-            # Grasp Approach Arrow Marker
+            # Grasp Approach Arrow Marker (6D Perception Vector)
             arrow = Marker()
             arrow.header.frame_id = "world"
             arrow.header.stamp = now
@@ -170,44 +138,22 @@ class VisionDetectorNode(Node):
             arrow.type = Marker.ARROW
             arrow.action = Marker.ADD
 
-            # Start point: 10cm above part
+            # Start point: 12cm above part
             p_start = Point(x=float(px), y=float(py), z=float(pz + 0.12))
-            # End point: at top of part
-            p_end = Point(x=float(px), y=float(py), z=float(pz + 0.03))
+            # End point: at top surface of part
+            p_end = Point(x=float(px), y=float(py), z=float(pz + 0.025))
             arrow.points = [p_start, p_end]
 
-            arrow.scale.x = 0.010  # Shaft diameter
-            arrow.scale.y = 0.020  # Head diameter
-            arrow.scale.z = 0.025  # Head length
+            arrow.scale.x = 0.008  # Shaft diameter
+            arrow.scale.y = 0.016  # Head diameter
+            arrow.scale.z = 0.020  # Head length
 
-            # Highlight best candidate in glowing green, others subtle grey/white
+            # Highlight current candidate in glowing green, others in subtle semi-transparent white
             if p == best:
                 arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = (0.1, 1.0, 0.2, 1.0)
             else:
-                arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = (0.7, 0.7, 0.7, 0.4)
+                arrow.color.r, arrow.color.g, arrow.color.b, arrow.color.a = (0.85, 0.90, 1.0, 0.45)
             ma.markers.append(arrow)
-
-        # Placed parts on the pallet fixture (2x2 grid)
-        for j, pl in enumerate(self.placed_parts):
-            m_pl = Marker()
-            m_pl.header.frame_id = "world"
-            m_pl.header.stamp = now
-            m_pl.ns = "placed_parts"
-            m_pl.id = 200 + j
-            m_pl.type = Marker.CYLINDER
-            m_pl.action = Marker.ADD
-            m_pl.pose.position.x = float(pl["px"])
-            m_pl.pose.position.y = float(pl["py"])
-            m_pl.pose.position.z = float(pl["pz"])
-            m_pl.pose.orientation.w = 1.0
-            m_pl.scale.x = 0.05
-            m_pl.scale.y = 0.05
-            m_pl.scale.z = float(self.part_h)
-            m_pl.color.r = float(pl["color"][0])
-            m_pl.color.g = float(pl["color"][1])
-            m_pl.color.b = float(pl["color"][2])
-            m_pl.color.a = 1.0
-            ma.markers.append(m_pl)
 
         self.marker_pub.publish(ma)
 
@@ -222,7 +168,7 @@ class VisionDetectorNode(Node):
         return response
 
     def consume_target_callback(self, request, response):
-        """Called when a part is successfully grasped and moved to dropoff."""
+        """Called when a part is successfully grasped and picked from the bin."""
         best = self.get_best_part()
         if best:
             part_id = best['id']
@@ -230,19 +176,9 @@ class VisionDetectorNode(Node):
             self.consumed_marker_ids.append(mid)
             self.active_parts.remove(best)
 
-            # Record placed workpiece position on dropoff pallet
-            grid_offsets = [(-0.04, -0.04), (-0.04, 0.04), (0.04, -0.04), (0.04, 0.04)]
-            slot_idx = len(self.placed_parts)
-            dx, dy = grid_offsets[slot_idx % len(grid_offsets)]
-            placed = dict(best)
-            placed["px"] = 0.48 + dx
-            placed["py"] = -0.22 + dy
-            placed["pz"] = 0.06 + self.part_h / 2.0
-            self.placed_parts.append(placed)
-
             response.success = True
             response.message = f"Consumed {part_id}. Remaining in bin: {len(self.active_parts)}"
-            self.get_logger().info(f"✓ Workpiece {part_id} picked & placed on pallet! {len(self.active_parts)} parts left in bin.")
+            self.get_logger().info(f"✓ Workpiece {part_id} grasped! {len(self.active_parts)} parts left in bin.")
             self.detection_loop()
         else:
             response.success = False

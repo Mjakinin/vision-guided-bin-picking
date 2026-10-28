@@ -253,8 +253,8 @@ class MoveIt2Interface:
     def attach_object(self, object_id: str, link_name: str = "panda_hand",
                       color=(0.95, 0.20, 0.20, 1.0)) -> bool:
         """
-        Atomically removes workpiece from world collision objects and attaches it
-        between the parallel gripper finger pads of panda_hand via /apply_planning_scene.
+        Atomically removes workpiece from world bin and attaches it
+        cleanly between the parallel gripper finger pads of panda_hand via /apply_planning_scene.
         """
         # Step 1: Remove from world bin
         req1 = ApplyPlanningScene.Request()
@@ -270,6 +270,7 @@ class MoveIt2Interface:
         # Step 2: Attach to panda_hand
         req2 = ApplyPlanningScene.Request()
         req2.scene.is_diff = True
+        req2.scene.robot_state.is_diff = True
         aco = AttachedCollisionObject()
         aco.link_name = link_name
         aco.object.id = object_id
@@ -307,12 +308,13 @@ class MoveIt2Interface:
                       drop_x: float = 0.48, drop_y: float = -0.22, drop_z: float = 0.06,
                       color=(0.95, 0.20, 0.20, 1.0)) -> bool:
         """
-        Atomically detaches workpiece from panda_hand and places it standing upright
-        at the designated dropoff coordinates on the pallet fixture via /apply_planning_scene.
+        Atomically detaches workpiece from panda_hand, removes the detached copy MoveIt drops
+        at the gripper TCP, and places the workpiece upright at the designated pallet fixture slot.
         """
-        # Step 1: Remove attached object from robot state
+        # Step 1: Detach from gripper (MoveIt removes it from attached bodies)
         req1 = ApplyPlanningScene.Request()
         req1.scene.is_diff = True
+        req1.scene.robot_state.is_diff = True
         aco_remove = AttachedCollisionObject()
         aco_remove.link_name = link_name
         aco_remove.object.id = object_id
@@ -322,13 +324,24 @@ class MoveIt2Interface:
         req1.scene.robot_state.attached_collision_objects.append(aco_remove)
         self._call_service_sync(self.scene_client, req1, timeout_sec=2.0)
 
-        # Step 2: Add object back into world at exact dropoff location on pallet
+        # Step 2: Remove the world copy that MoveIt automatically creates at current TCP upon detachment
         req2 = ApplyPlanningScene.Request()
         req2.scene.is_diff = True
+        co_rem = CollisionObject()
+        co_rem.header.frame_id = "world"
+        co_rem.header.stamp = self.node.get_clock().now().to_msg()
+        co_rem.id = object_id
+        co_rem.operation = CollisionObject.REMOVE
+        req2.scene.world.collision_objects.append(co_rem)
+        self._call_service_sync(self.scene_client, req2, timeout_sec=2.0)
+
+        # Step 3: Add workpiece cleanly at designated pallet fixture location
+        req3 = ApplyPlanningScene.Request()
+        req3.scene.is_diff = True
         co_add = CollisionObject()
         co_add.header.frame_id = "world"
         co_add.header.stamp = self.node.get_clock().now().to_msg()
-        co_add.id = f"placed_{object_id}"
+        co_add.id = object_id
         co_add.operation = CollisionObject.ADD
 
         cyl = SolidPrimitive()
@@ -336,22 +349,22 @@ class MoveIt2Interface:
         cyl.dimensions = [0.05, 0.025]  # 5cm height, 2.5cm radius
         co_add.primitives.append(cyl)
 
-        # Placed on pallet top (pallet top is z = 0.06m, cylinder center is z = 0.06 + 0.025 = 0.085m)
+        # Placed upright on pallet (pallet top surface is z = 0.06m, cylinder center is z = 0.06 + 0.025 = 0.085m)
         p = Pose()
         p.position.x = float(drop_x)
         p.position.y = float(drop_y)
         p.position.z = float(drop_z + 0.025)
         p.orientation.w = 1.0
         co_add.primitive_poses.append(p)
-        req2.scene.world.collision_objects.append(co_add)
+        req3.scene.world.collision_objects.append(co_add)
 
         if color:
             oc = ObjectColor()
-            oc.id = f"placed_{object_id}"
+            oc.id = object_id
             oc.color = ColorRGBA(r=float(color[0]), g=float(color[1]), b=float(color[2]), a=float(color[3]) if len(color) > 3 else 1.0)
-            req2.scene.object_colors.append(oc)
+            req3.scene.object_colors.append(oc)
 
-        res2 = self._call_service_sync(self.scene_client, req2, timeout_sec=2.0)
-        success = res2 is not None and res2.success
-        self.node.get_logger().info(f"Placed '{f'placed_{object_id}'}' on pallet at ({drop_x:.3f}, {drop_y:.3f}) (success={success}).")
+        res3 = self._call_service_sync(self.scene_client, req3, timeout_sec=2.0)
+        success = res3 is not None and res3.success
+        self.node.get_logger().info(f"Placed '{object_id}' on pallet at ({drop_x:.3f}, {drop_y:.3f}) (success={success}).")
         return success
