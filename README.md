@@ -10,6 +10,14 @@
 
 ---
 
+## 🎬 Live Demonstration
+
+![Autonomous Vision-Guided Bin-Picking Demo](docs/media/bin_picking_demo.gif)
+
+> 📹 **Full HD Demo Video:** [`docs/media/bin_picking_demo.mp4`](docs/media/bin_picking_demo.mp4) showing real-time 3D perception, OMPL motion planning, Cartesian linear immersion into deep bin walls, payload attachment at Franka TCP ($z=0.1034\,\text{m}$), and precise $2 \times 2$ pallet kitting.
+
+---
+
 ## 📌 Executive Summary
 
 Modern industrial manufacturing demands flexible automation capable of handling high-mix, low-volume production parts without requiring rigid mechanical feeders. **Bin-Picking**—the automated detection, singulation, grasping, and placement of randomly oriented objects from container bins into assembly fixtures—is among the most critical capabilities in industrial robotics.

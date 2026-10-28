@@ -14,7 +14,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Pose, Point, Quaternion
-from moveit_msgs.msg import CollisionObject, PlanningScene
+from moveit_msgs.msg import CollisionObject, PlanningScene, ObjectColor
 from moveit_msgs.srv import ApplyPlanningScene
 from shape_msgs.msg import SolidPrimitive
 from visualization_msgs.msg import Marker, MarkerArray
@@ -97,6 +97,29 @@ class PlanningSceneNode(Node):
             objects.append(co_part)
 
         req.scene.world.collision_objects = objects
+
+        # Assign distinctive, realistic colors to every collision object in the MoveIt Planning Scene
+        # (Prevents MoveIt from rendering the entire workcell in solid monochromatic green)
+        def _col(oid, r, g, b, a=1.0):
+            oc = ObjectColor()
+            oc.id = oid
+            oc.color = ColorRGBA(r=float(r), g=float(g), b=float(b), a=float(a))
+            return oc
+
+        req.scene.object_colors = [
+            _col("workstation_table", 0.35, 0.36, 0.40, 1.0),     # Dark slate grey table
+            _col("safety_backplate", 0.25, 0.26, 0.28, 0.85),     # Charcoal safety barrier
+            _col("bin_floor", 0.20, 0.45, 0.70, 0.95),            # Steel blue parts bin
+            _col("bin_wall_north", 0.20, 0.45, 0.70, 0.95),
+            _col("bin_wall_south", 0.20, 0.45, 0.70, 0.95),
+            _col("bin_wall_east", 0.20, 0.45, 0.70, 0.95),
+            _col("bin_wall_west", 0.20, 0.45, 0.70, 0.95),
+            _col("dropoff_pallet", 0.45, 0.35, 0.25, 1.0),        # Bronze/Walnut fixture pallet
+            _col("workpiece_1", 0.95, 0.20, 0.20, 1.0),           # Vivid Crimson Red
+            _col("workpiece_2", 0.95, 0.85, 0.10, 1.0),           # Bright Gold
+            _col("workpiece_3", 0.15, 0.85, 0.95, 1.0),           # Electric Cyan
+            _col("workpiece_4", 0.85, 0.20, 0.85, 1.0),           # Neon Magenta
+        ]
 
         future = self.scene_client.call_async(req)
         future.add_done_callback(self._on_scene_applied)
