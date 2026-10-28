@@ -41,13 +41,39 @@ def configure_rviz_camera():
             with open(rviz_path, "r") as f:
                 cfg = yaml.safe_load(f)
             v = cfg["Visualization Manager"]["Views"]["Current"]
-            v["Focal Point"]["X"] = 0.25
-            v["Focal Point"]["Y"] = 0.55
-            v["Focal Point"]["Z"] = 0.15
-            v["Distance"] = 2.20
-            v["Pitch"] = 0.48
+            v["Focal Point"]["X"] = 0.35
+            v["Focal Point"]["Y"] = 0.50
+            v["Focal Point"]["Z"] = 0.12
+            v["Distance"] = 2.55
+            v["Pitch"] = 0.52
             v["Yaw"] = 5.958578
             v["Near Clip Distance"] = 0.01
+
+            if "Window Geometry" in cfg:
+                cfg["Window Geometry"]["X"] = 0
+                cfg["Window Geometry"]["Y"] = 0
+                cfg["Window Geometry"]["Width"] = 1280
+                cfg["Window Geometry"]["Height"] = 720
+
+            # Ensure perception markers are also visible in RViz
+            displays = cfg.get("Visualization Manager", {}).get("Displays", [])
+            topics = [d.get("Topic", {}).get("Value") for d in displays if isinstance(d.get("Topic"), dict)]
+            if "/bin_picking/part_markers" not in topics:
+                displays.append({
+                    "Class": "rviz_default_plugins/MarkerArray",
+                    "Enabled": True,
+                    "Name": "PerceptionMarkers",
+                    "Namespaces": {},
+                    "Topic": {
+                        "Depth": 10,
+                        "Durability Policy": "Volatile",
+                        "History Policy": "Keep Last",
+                        "Reliability Policy": "Reliable",
+                        "Value": "/bin_picking/part_markers"
+                    },
+                    "Value": True
+                })
+
             with open(rviz_path, "w") as f:
                 yaml.dump(cfg, f)
         except Exception as e:
@@ -198,24 +224,24 @@ def main():
     final_mp4 = os.path.join(media_dir, "bin_picking_demo.mp4")
     final_gif = os.path.join(media_dir, "bin_picking_demo.gif")
 
-    # Crop pure 3D viewport (eliminating left dock and top menu bar)
-    crop_filter = "crop=736:616:536:98"
+    # Crop pure 3D viewport (eliminating left dock, top menu/toolbar, and bottom status bar)
+    crop_filter = "crop=808:596:460:90"
 
     # Encode optimized web-friendly MP4 (H.264, FastStart)
     print(f"➜ Optimiere MP4 Video -> {final_mp4}...")
     subprocess.run([
         "ffmpeg", "-y", "-i", raw_mp4,
-        "-vf", f"{crop_filter},scale=736:616",
+        "-vf", f"{crop_filter},scale=808:596",
         "-c:v", "libx264", "-crf", "22", "-preset", "medium",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         final_mp4
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # Encode lightweight animated GIF for GitHub README preview (10 fps, 540px)
+    # Encode lightweight animated GIF for GitHub README preview (10 fps, 580px)
     print(f"➜ Erzeuge GitHub README GIF -> {final_gif}...")
     subprocess.run([
         "ffmpeg", "-y", "-i", raw_mp4,
-        "-vf", f"{crop_filter},fps=10,scale=540:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+        "-vf", f"{crop_filter},fps=10,scale=580:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
         "-loop", "0",
         final_gif
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

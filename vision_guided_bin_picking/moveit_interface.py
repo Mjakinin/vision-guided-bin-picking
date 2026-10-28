@@ -27,7 +27,9 @@ from moveit_msgs.msg import (
     PlanningScene,
     CollisionObject,
     AttachedCollisionObject,
+    ObjectColor,
 )
+from std_msgs.msg import ColorRGBA
 from moveit_msgs.srv import GetCartesianPath, ApplyPlanningScene
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
 from control_msgs.action import FollowJointTrajectory, GripperCommand
@@ -248,8 +250,26 @@ class MoveIt2Interface:
         res = self._call_action_sync(self.gripper_client, goal, timeout_sec=5.0)
         return res is not None
 
-    def attach_object(self, object_id: str, link_name: str = "panda_link8") -> bool:
-        """Attaches a grasped collision cylinder to the end-effector link."""
+    def attach_object(self, object_id: str, link_name: str = "panda_hand",
+                      color=(0.95, 0.20, 0.20, 1.0)) -> bool:
+        """
+        Atomically removes workpiece from world collision objects and attaches it
+        between the parallel gripper finger pads of panda_hand via /apply_planning_scene.
+        """
+        # Step 1: Remove from world bin
+        req1 = ApplyPlanningScene.Request()
+        req1.scene.is_diff = True
+        co_remove = CollisionObject()
+        co_remove.header.frame_id = "world"
+        co_remove.header.stamp = self.node.get_clock().now().to_msg()
+        co_remove.id = object_id
+        co_remove.operation = CollisionObject.REMOVE
+        req1.scene.world.collision_objects.append(co_remove)
+        self._call_service_sync(self.scene_client, req1, timeout_sec=2.0)
+
+        # Step 2: Attach to panda_hand
+        req2 = ApplyPlanningScene.Request()
+        req2.scene.is_diff = True
         aco = AttachedCollisionObject()
         aco.link_name = link_name
         aco.object.id = object_id
@@ -258,36 +278,80 @@ class MoveIt2Interface:
         aco.object.operation = CollisionObject.ADD
         aco.touch_links = ["panda_hand", "panda_leftfinger", "panda_rightfinger", "panda_link7", "panda_link8"]
 
-        # Define cylinder geometry directly so MoveIt always renders it attached to gripper
         cyl = SolidPrimitive()
         cyl.type = SolidPrimitive.CYLINDER
-        cyl.dimensions = [0.05, 0.025] # 5cm height, 2.5cm radius
+        cyl.dimensions = [0.05, 0.025]  # 5cm height, 2.5cm radius
         aco.object.primitives.append(cyl)
 
-        # Exact TCP offset from panda_link8 flange to center of finger pads: z = 0.1034m
+        # Exact center between finger pads of panda_hand: z = 0.1034m
         p = Pose()
         p.position.x = 0.0
         p.position.y = 0.0
-        p.position.z = 0.1034 # Exact Franka Panda TCP grasp center
-        p.orientation.x = 0.0
-        p.orientation.y = 0.0
-        p.orientation.z = 0.0
+        p.position.z = 0.1034
         p.orientation.w = 1.0
         aco.object.primitive_poses.append(p)
+        req2.scene.robot_state.attached_collision_objects.append(aco)
 
-        self.attached_object_pub.publish(aco)
-        self.node.get_logger().info(f"Attached '{object_id}' to {link_name} at TCP z=0.1034m.")
-        return True
+        if color:
+            oc = ObjectColor()
+            oc.id = object_id
+            oc.color = ColorRGBA(r=float(color[0]), g=float(color[1]), b=float(color[2]), a=float(color[3]) if len(color) > 3 else 1.0)
+            req2.scene.object_colors.append(oc)
 
-    def detach_object(self, object_id: str, link_name: str = "panda_link8") -> bool:
-        """Detaches an object upon release so it stays placed in the workcell."""
-        aco = AttachedCollisionObject()
-        aco.link_name = link_name
-        aco.object.id = object_id
-        aco.object.header.frame_id = link_name
-        aco.object.header.stamp = self.node.get_clock().now().to_msg()
-        aco.object.operation = CollisionObject.REMOVE
+        res2 = self._call_service_sync(self.scene_client, req2, timeout_sec=2.0)
+        success = res2 is not None and res2.success
+        self.node.get_logger().info(f"Attached '{object_id}' to {link_name} via PlanningScene (success={success}).")
+        return success
 
-        self.attached_object_pub.publish(aco)
-        self.node.get_logger().info(f"Detached '{object_id}' from {link_name}.")
-        return True
+    def detach_object(self, object_id: str, link_name: str = "panda_hand",
+                      drop_x: float = 0.48, drop_y: float = -0.22, drop_z: float = 0.06,
+                      color=(0.95, 0.20, 0.20, 1.0)) -> bool:
+        """
+        Atomically detaches workpiece from panda_hand and places it standing upright
+        at the designated dropoff coordinates on the pallet fixture via /apply_planning_scene.
+        """
+        # Step 1: Remove attached object from robot state
+        req1 = ApplyPlanningScene.Request()
+        req1.scene.is_diff = True
+        aco_remove = AttachedCollisionObject()
+        aco_remove.link_name = link_name
+        aco_remove.object.id = object_id
+        aco_remove.object.header.frame_id = link_name
+        aco_remove.object.header.stamp = self.node.get_clock().now().to_msg()
+        aco_remove.object.operation = CollisionObject.REMOVE
+        req1.scene.robot_state.attached_collision_objects.append(aco_remove)
+        self._call_service_sync(self.scene_client, req1, timeout_sec=2.0)
+
+        # Step 2: Add object back into world at exact dropoff location on pallet
+        req2 = ApplyPlanningScene.Request()
+        req2.scene.is_diff = True
+        co_add = CollisionObject()
+        co_add.header.frame_id = "world"
+        co_add.header.stamp = self.node.get_clock().now().to_msg()
+        co_add.id = f"placed_{object_id}"
+        co_add.operation = CollisionObject.ADD
+
+        cyl = SolidPrimitive()
+        cyl.type = SolidPrimitive.CYLINDER
+        cyl.dimensions = [0.05, 0.025]  # 5cm height, 2.5cm radius
+        co_add.primitives.append(cyl)
+
+        # Placed on pallet top (pallet top is z = 0.06m, cylinder center is z = 0.06 + 0.025 = 0.085m)
+        p = Pose()
+        p.position.x = float(drop_x)
+        p.position.y = float(drop_y)
+        p.position.z = float(drop_z + 0.025)
+        p.orientation.w = 1.0
+        co_add.primitive_poses.append(p)
+        req2.scene.world.collision_objects.append(co_add)
+
+        if color:
+            oc = ObjectColor()
+            oc.id = f"placed_{object_id}"
+            oc.color = ColorRGBA(r=float(color[0]), g=float(color[1]), b=float(color[2]), a=float(color[3]) if len(color) > 3 else 1.0)
+            req2.scene.object_colors.append(oc)
+
+        res2 = self._call_service_sync(self.scene_client, req2, timeout_sec=2.0)
+        success = res2 is not None and res2.success
+        self.node.get_logger().info(f"Placed '{f'placed_{object_id}'}' on pallet at ({drop_x:.3f}, {drop_y:.3f}) (success={success}).")
+        return success

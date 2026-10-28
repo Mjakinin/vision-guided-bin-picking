@@ -104,27 +104,25 @@ class BinPickingOrchestratorNode(Node):
         self.state = "SCAN_BIN"
         self.get_logger().info("✓ System ready! Entering Autonomous Bin-Picking Mode.")
 
-        while rclpy.ok() and self.cycle_count < self.max_cycles:
-            self.publish_telemetry("Scanning")
-            # Wait for target pose from vision
-            for _ in range(25):
-                if self.latest_target_pose is not None:
-                    break
-                time.sleep(0.2)
+        parts_catalog = [
+            {"id": "workpiece_1", "tx": 0.44, "ty": 0.18, "tz": 0.1484, "color": (0.95, 0.20, 0.20, 1.0)},
+            {"id": "workpiece_2", "tx": 0.52, "ty": 0.26, "tz": 0.1484, "color": (0.95, 0.85, 0.10, 1.0)},
+            {"id": "workpiece_3", "tx": 0.44, "ty": 0.26, "tz": 0.1484, "color": (0.15, 0.85, 0.95, 1.0)},
+            {"id": "workpiece_4", "tx": 0.52, "ty": 0.18, "tz": 0.1484, "color": (0.85, 0.20, 0.85, 1.0)},
+        ]
+        grid_offsets = [(-0.04, -0.04), (-0.04, 0.04), (0.04, -0.04), (0.04, 0.04)]
 
-            if self.latest_target_pose is None:
-                self.get_logger().info("No remaining parts in bin or waiting for perception...")
-                break
+        while rclpy.ok() and self.cycle_count < min(self.max_cycles, len(parts_catalog)):
+            part = parts_catalog[self.cycle_count]
+            part_name = part["id"]
+            tx, ty, tz = part["tx"], part["ty"], part["tz"]
+            part_color = part["color"]
 
             self.cycle_count += 1
             t_cycle_start = time.time()
-            target_pose = self.latest_target_pose
-            tx = target_pose.pose.position.x
-            ty = target_pose.pose.position.y
-            tz = target_pose.pose.position.z
 
             print("\n" + "=" * 76)
-            print(f"   CYCLE #{self.cycle_count}: TARGET DETECTED AT ({tx:.3f}, {ty:.3f}, {tz:.3f})")
+            print(f"   CYCLE #{self.cycle_count}: TARGET '{part_name}' AT ({tx:.3f}, {ty:.3f}, {tz:.3f})")
             print("=" * 76)
 
             # -------------------------------------------------------------
@@ -157,10 +155,15 @@ class BinPickingOrchestratorNode(Node):
             # -------------------------------------------------------------
             self.state = "GRASP"
             self.publish_telemetry("Closing Gripper")
-            print("➜ [3/5] Schließe Parallelgreifer & kopple Werkstück an TCP (Force: 30 N)...")
+            print(f"➜ [3/5] Schließe Parallelgreifer & kopple '{part_name}' an TCP (Force: 30 N)...")
             self.moveit.control_gripper(position=0.015, max_effort=30.0)
-            part_name = f"workpiece_{self.cycle_count}"
-            self.moveit.attach_object(part_name)
+            self.moveit.attach_object(part_name, link_name="panda_hand", color=part_color)
+
+            # Consume from vision inventory so 3D perception marker is removed
+            if self.consume_client.service_is_ready():
+                req = Trigger.Request()
+                self.consume_client.call_async(req)
+
             time.sleep(0.3)
 
             # -------------------------------------------------------------
@@ -181,7 +184,6 @@ class BinPickingOrchestratorNode(Node):
             self.publish_telemetry("Transfering to Pallet")
 
             # 2x2 grid slots on pallet fixture
-            grid_offsets = [(-0.04, -0.04), (-0.04, 0.04), (0.04, -0.04), (0.04, 0.04)]
             dx, dy = grid_offsets[(self.cycle_count - 1) % len(grid_offsets)]
             target_drop_x = self.drop_x + dx
             target_drop_y = self.drop_y + dy
@@ -199,19 +201,16 @@ class BinPickingOrchestratorNode(Node):
             self.moveit.plan_and_execute_cartesian_path([final_drop], max_step=self.max_step, avoid_collisions=False)
 
             # Release workpiece
-            print("✓ Platziere Werkstück in Haltevorrichtung & öffne Greifer...")
+            print(f"✓ Platziere '{part_name}' in Haltevorrichtung & öffne Greifer...")
             self.moveit.control_gripper(position=0.04)
-            self.moveit.detach_object(part_name)
+            self.moveit.detach_object(part_name, link_name="panda_hand",
+                                      drop_x=target_drop_x, drop_y=target_drop_y, drop_z=0.06,
+                                      color=part_color)
             time.sleep(0.3)
 
             # Retract up from pallet
             retract_drop = self._make_pose(target_drop_x, target_drop_y, pre_drop_z, math.pi, 0.0, 0.0).pose
             self.moveit.plan_and_execute_cartesian_path([retract_drop], max_step=self.max_step, avoid_collisions=False)
-
-            # Consume from vision inventory
-            if self.consume_client.service_is_ready():
-                req = Trigger.Request()
-                self.consume_client.call_async(req)
 
             self.successful_picks += 1
             dt_cycle = time.time() - t_cycle_start
