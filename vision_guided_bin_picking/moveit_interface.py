@@ -30,7 +30,7 @@ from moveit_msgs.msg import (
 )
 from moveit_msgs.srv import GetCartesianPath, ApplyPlanningScene
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
-from control_msgs.action import GripperCommand
+from control_msgs.action import FollowJointTrajectory, GripperCommand
 from shape_msgs.msg import SolidPrimitive
 from sensor_msgs.msg import JointState
 
@@ -44,6 +44,7 @@ class MoveIt2Interface:
         # Action Clients
         self.move_group_client = ActionClient(self.node, MoveGroup, "/move_action")
         self.execute_traj_client = ActionClient(self.node, ExecuteTrajectory, "/execute_trajectory")
+        self.arm_client = ActionClient(self.node, FollowJointTrajectory, "/panda_arm_controller/follow_joint_trajectory")
         self.gripper_client = ActionClient(self.node, GripperCommand, "/panda_hand_controller/gripper_cmd")
 
         # Service Clients
@@ -68,16 +69,19 @@ class MoveIt2Interface:
     def _joint_callback(self, msg: JointState):
         self.latest_joint_state = msg
 
-    def wait_for_servers(self, timeout_sec: float = 10.0) -> bool:
-        """Wait for MoveIt 2 action and service servers to become available."""
-        self.node.get_logger().info("Connecting to MoveIt 2 actions and services...")
+    def wait_for_servers(self, timeout_sec: float = 25.0) -> bool:
+        """Wait for MoveIt 2 action servers, controllers, and services to become fully active."""
+        self.node.get_logger().info("Connecting to MoveIt 2 actions, controllers, and services...")
         t0 = time.time()
         while time.time() - t0 < timeout_sec:
             if self.move_group_client.wait_for_server(timeout_sec=0.5) and \
                self.cartesian_client.wait_for_service(timeout_sec=0.5) and \
-               self.scene_client.wait_for_service(timeout_sec=0.5):
-                self.node.get_logger().info("✓ Connected to MoveIt 2 services!")
+               self.scene_client.wait_for_service(timeout_sec=0.5) and \
+               self.arm_client.wait_for_server(timeout_sec=0.5) and \
+               self.gripper_client.wait_for_server(timeout_sec=0.5):
+                self.node.get_logger().info("✓ Connected to MoveIt 2 servers and controllers!")
                 return True
+            time.sleep(0.5)
         self.node.get_logger().warn("Timeout connecting to MoveIt 2 servers.")
         return False
 
@@ -249,6 +253,8 @@ class MoveIt2Interface:
         aco = AttachedCollisionObject()
         aco.link_name = link_name
         aco.object.id = object_id
+        aco.object.header.frame_id = link_name
+        aco.object.header.stamp = self.node.get_clock().now().to_msg()
         aco.object.operation = CollisionObject.ADD
         aco.touch_links = ["panda_hand", "panda_leftfinger", "panda_rightfinger", "panda_link7", "panda_link8"]
 
@@ -272,6 +278,8 @@ class MoveIt2Interface:
         aco = AttachedCollisionObject()
         aco.link_name = link_name
         aco.object.id = object_id
+        aco.object.header.frame_id = link_name
+        aco.object.header.stamp = self.node.get_clock().now().to_msg()
         aco.object.operation = CollisionObject.REMOVE
 
         self.attached_object_pub.publish(aco)

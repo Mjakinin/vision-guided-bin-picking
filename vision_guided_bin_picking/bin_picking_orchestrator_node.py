@@ -85,16 +85,21 @@ class BinPickingOrchestratorNode(Node):
     def run_fsm_loop(self):
         """Worker thread executing the autonomous Pick-and-Place sequence."""
         time.sleep(2.0)
-        self.get_logger().info("➜ [1/6] Connecting to MoveIt 2 servers...")
-        if not self.moveit.wait_for_servers(timeout_sec=15.0):
-            self.get_logger().error("Timeout connecting to MoveIt 2!")
+        self.get_logger().info("➜ [1/6] Connecting to MoveIt 2 servers and controllers...")
+        if not self.moveit.wait_for_servers(timeout_sec=30.0):
+            self.get_logger().error("Timeout connecting to MoveIt 2 servers and controllers!")
             return
+
+        self.get_logger().info("✓ MoveIt 2 and Franka controllers ready. Initializing visualization...")
+        # Give RViz2 a moment to render the initial workcell and detected workpieces
+        time.sleep(3.0)
 
         self.get_logger().info("➜ [2/6] Moving Franka Panda to Home Inspection Pose...")
         self.publish_telemetry("Homing")
         home_pose = self._make_pose(0.40, 0.0, 0.42, math.pi, 0.0, 0.0)
         self.moveit.plan_and_execute_to_pose(home_pose)
         self.moveit.control_gripper(position=0.04) # Open gripper
+        time.sleep(1.0)
 
         self.state = "SCAN_BIN"
         self.get_logger().info("✓ System ready! Entering Autonomous Bin-Picking Mode.")

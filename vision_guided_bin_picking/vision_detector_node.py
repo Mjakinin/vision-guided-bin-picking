@@ -46,13 +46,14 @@ class VisionDetectorNode(Node):
         # Workpiece inventory in the bin (x_offset, y_offset, yaw_deg, color)
         # Offsets relative to bin center (0.48, 0.22)
         self.initial_parts = [
-            {"id": "workpiece_1", "dx": -0.04, "dy": -0.04, "yaw": 0.0, "color": (0.95, 0.2, 0.2)},   # Vivid Red
-            {"id": "workpiece_2", "dx":  0.04, "dy":  0.04, "yaw": 0.0, "color": (0.95, 0.85, 0.1)},  # Bright Gold
-            {"id": "workpiece_3", "dx": -0.04, "dy":  0.04, "yaw": 0.0, "color": (0.15, 0.85, 0.95)}, # Electric Cyan
-            {"id": "workpiece_4", "dx":  0.04, "dy": -0.04, "yaw": 0.0, "color": (0.85, 0.2, 0.85)},  # Neon Magenta
+            {"id": "workpiece_1", "marker_id": 0, "dx": -0.04, "dy": -0.04, "yaw": 0.0, "color": (0.95, 0.2, 0.2)},   # Vivid Red
+            {"id": "workpiece_2", "marker_id": 1, "dx":  0.04, "dy":  0.04, "yaw": 0.0, "color": (0.95, 0.85, 0.1)},  # Bright Gold
+            {"id": "workpiece_3", "marker_id": 2, "dx": -0.04, "dy":  0.04, "yaw": 0.0, "color": (0.15, 0.85, 0.95)}, # Electric Cyan
+            {"id": "workpiece_4", "marker_id": 3, "dx":  0.04, "dy": -0.04, "yaw": 0.0, "color": (0.85, 0.2, 0.85)},  # Neon Magenta
         ]
         self.active_parts = list(self.initial_parts)
         self.placed_parts = []
+        self.consumed_marker_ids = []
 
         # Periodic detection and marker publish loop (2 Hz)
         self.timer = self.create_timer(0.5, self.detection_loop)
@@ -111,12 +112,26 @@ class VisionDetectorNode(Node):
         ma = MarkerArray()
         now = self.get_clock().now().to_msg()
 
-        # Delete all previous markers so picked parts vanish immediately
-        del_all = Marker()
-        del_all.action = Marker.DELETEALL
-        ma.markers.append(del_all)
+        # Delete markers that were consumed
+        for mid in self.consumed_marker_ids:
+            del_part = Marker()
+            del_part.header.frame_id = "world"
+            del_part.header.stamp = now
+            del_part.ns = "parts"
+            del_part.id = mid
+            del_part.action = Marker.DELETE
+            ma.markers.append(del_part)
 
-        for i, p in enumerate(self.active_parts):
+            del_arrow = Marker()
+            del_arrow.header.frame_id = "world"
+            del_arrow.header.stamp = now
+            del_arrow.ns = "grasp_vectors"
+            del_arrow.id = 100 + mid
+            del_arrow.action = Marker.DELETE
+            ma.markers.append(del_arrow)
+
+        for p in self.active_parts:
+            mid = p["marker_id"]
             px = self.bin_x + p["dx"]
             py = self.bin_y + p["dy"]
             pz = self.bin_z + self.part_h / 2.0
@@ -126,7 +141,7 @@ class VisionDetectorNode(Node):
             m.header.frame_id = "world"
             m.header.stamp = now
             m.ns = "parts"
-            m.id = i
+            m.id = mid
             m.type = Marker.CYLINDER
             m.action = Marker.ADD
             m.pose.position.x = float(px)
@@ -149,7 +164,7 @@ class VisionDetectorNode(Node):
             arrow.header.frame_id = "world"
             arrow.header.stamp = now
             arrow.ns = "grasp_vectors"
-            arrow.id = 100 + i
+            arrow.id = 100 + mid
             arrow.type = Marker.ARROW
             arrow.action = Marker.ADD
 
@@ -209,6 +224,8 @@ class VisionDetectorNode(Node):
         best = self.get_best_part()
         if best:
             part_id = best['id']
+            mid = best.get('marker_id', 0)
+            self.consumed_marker_ids.append(mid)
             self.active_parts.remove(best)
 
             # Record placed workpiece position on dropoff pallet
